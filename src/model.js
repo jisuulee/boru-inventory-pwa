@@ -93,7 +93,12 @@ export function search(products, query) {
     return { product, score }
   }).filter(match => match.score).sort((a, b) => b.score - a.score)
 }
-const words = { 영:0, 한:1, 하나:1, 일:1, 두:2, 둘:2, 이:2, 세:3, 셋:3, 삼:3, 네:4, 넷:4, 사:4, 다섯:5, 오:5, 여섯:6, 육:6, 일곱:7, 칠:7, 여덟:8, 팔:8, 아홉:9, 구:9, 열:10, 십:10 }
+const words = {
+  영: 0, 한: 1, 하나: 1, 일: 1, 두: 2, 둘: 2, 이: 2,
+  세: 3, 새: 3, 쎄: 3, 쌔: 3, 셋: 3, 삼: 3,
+  네: 4, 넷: 4, 사: 4, 다섯: 5, 오: 5, 여섯: 6, 육: 6,
+  일곱: 7, 칠: 7, 여덟: 8, 팔: 8, 아홉: 9, 구: 9, 열: 10, 십: 10,
+}
 const cartonUnit = '(?:[보뽀]\\s*[루로러르료뤄류]|[개계게])'
 const countCommand = new RegExp(
   '^(.*?)\\s*(\\d+|[가-힣]{1,8})\\s*' + cartonUnit +

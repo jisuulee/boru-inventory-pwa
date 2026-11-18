@@ -56,6 +56,14 @@ test('speech distinguishes names, increments, decrements, absolute counts, and i
     ['세 개요', 'auto', '', 3],
     ['세 계', 'auto', '', 3],
     ['세게', 'auto', '', 3],
+    ['새개', 'auto', '', 3],
+    ['새보러', 'auto', '', 3],
+    ['새보루', 'auto', '', 3],
+    ['쎄 계 추가', 'add', '', 3],
+    ['두 보 로', 'auto', '', 2],
+    ['에쎄체인지 1미리 두 보 로 추가', 'add', '에쎄체인지 1미리', 2],
+    ['새 제품명 새 보 러 로 변경', 'set', '새 제품명', 3],
+    ['새 제품명', 'lookup', '새 제품명', undefined],
     ['두보류', 'auto', '', 2],
     ['에쎄체인지 1미리 두 보로', 'auto', '에쎄체인지 1미리', 2],
     ['3보로 변경', 'set', '', 3],
@@ -123,9 +131,9 @@ test('an implicit quantity saves a first count and waits for an operation on cou
   apply(data, { type: 'product', name: '에쎄 수 0.1', aliases: '' })
   const product = data.products[0]
   const session = sessionOf(data)
-  apply(data, voiceCountAction(session, product, parseSpeech('두보로')))
+  apply(data, voiceCountAction(session, product, parseSpeech('두 보 로')))
   assert.equal(quantity(session, product.id), 2)
-  assert.equal(voiceCountAction(session, product, parseSpeech('세게')), null)
+  assert.equal(voiceCountAction(session, product, parseSpeech('새보러')), null)
   assert.equal(quantity(session, product.id), 2)
   apply(data, voiceCountAction(session, product, parseSpeech('세 계 추가')))
   assert.equal(quantity(session, product.id), 5)
