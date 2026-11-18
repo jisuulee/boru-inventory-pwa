@@ -6,6 +6,7 @@ import { createVoice } from './voice.js'
 import './style.css'
 
 const verbs = { set: '수량 설정', add: '추가', subtract: '차감' }
+const canRegister = command => command.kind === 'add' || command.kind === 'auto'
 const date = value => new Date(value).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })
 const icons = {
   box: 'M3 7l9-4 9 4v10l-9 4-9-4z M3 7l9 4 9-4 M12 11v10 M7.5 5l9 4',
@@ -61,23 +62,41 @@ function App() {
     setPending(null)
     selected.current = null
   }
-  async function resolveCommand(data, session, command, product) {
-    const before = quantity(session, product.id)
+  async function resolveCommand(session, command, product) {
     selected.current = { session: session.id, id: product.id }
+    const before = quantity(session, product.id)
     if (command.kind === 'lookup') return product.name + ', ' + labelQuantity(before) + '입니다.'
-    const updated = await commit(voiceCountAction(session, product, command))
+    const action = voiceCountAction(session, product, command)
+    if (!action) {
+      setPending({ session: session.id, product, before, amount: command.amount })
+      if (command.amount === 0) return product.name + ', 현재 ' + labelQuantity(before) + '입니다. 0보루로 변경할까요?'
+      return product.name + ', 현재 ' + labelQuantity(before) + '입니다. ' +
+        labelQuantity(command.amount) + '를 추가할까요, 그 수량으로 변경할까요?'
+    }
+    return saveVoiceCount(action, product)
+  }
+  async function saveVoiceCount(action, product) {
+    const updated = await commit(action)
     const after = quantity(sessionOf(updated), product.id)
     const message = product.name + ', ' + labelQuantity(after) + '로 저장했습니다.'
     setNotice(message)
     return message
   }
   async function registerVoiceProduct(session, command) {
-    const updated = await commit({ type: 'voice-register', session: session.id, name: command.name, amount: command.amount })
+    const updated = await commit({ ...command, type: 'voice-register', session: session.id })
     const product = updated.products.at(-1)
     selected.current = { session: session.id, id: product.id }
     const message = product.name + ', 새 제품으로 등록하고 ' + labelQuantity(command.amount) + ' 저장했습니다.'
     setNotice(message)
     return message
+  }
+  async function selectOperation(waiting, kind) {
+    if (pending.current !== waiting) return ''
+    setPending(null)
+    return saveVoiceCount({
+      type: 'count', session: waiting.session, id: waiting.product.id,
+      expected: waiting.before, kind, amount: waiting.amount,
+    }, waiting.product)
   }
   async function receive(text, isCurrent) {
     setTranscript(text)
@@ -91,14 +110,19 @@ function App() {
     if (waiting) {
       if (waiting.session !== session.id) { setPending(null); return '조사가 바뀌었어요. 다시 말해 주세요.' }
       if (/^(취소|아니|아니요)$/.test(answer)) { setPending(null); return '취소했습니다.' }
-      if (waiting.command.kind === 'add' && /^(새\s*제품(으로)?\s*등록|신규\s*등록)$/.test(answer)) {
+      if (waiting.product) {
+        if (waiting.amount > 0 && /^추가(?:\s*(?:해\s*줘|해\s*주세요|요))?$/.test(answer)) return selectOperation(waiting, 'add')
+        if (/^(?:변경|설정)(?:\s*(?:해\s*줘|해\s*주세요|요))?$/.test(answer)) return selectOperation(waiting, 'set')
+        return waiting.amount === 0 ? '변경 또는 취소라고 말해 주세요.' : '추가, 변경, 취소 중 하나를 말해 주세요.'
+      }
+      if (canRegister(waiting.command) && /^(새\s*제품(으로)?\s*등록|신규\s*등록)$/.test(answer)) {
         setPending(null)
         return registerVoiceProduct(session, waiting.command)
       }
       const matches = search(waiting.products, answer)
       if (matches.length && matches.filter(item => item.score === 100).length === 1) {
         setPending(null)
-        return resolveCommand(data, session, waiting.command, matches[0].product)
+        return resolveCommand(session, waiting.command, matches[0].product)
       }
       return '화면의 제품을 선택하거나 정확한 제품명을 말해 주세요. 취소도 가능합니다.'
     }
@@ -107,24 +131,24 @@ function App() {
     if (command.kind === 'unclear') return '수량과 동작을 다시 말해 주세요. 예를 들어, 두 보루 추가.'
     if (!command.name && command.kind !== 'lookup') {
       const product = selected.current?.session === session.id && data.products.find(item => item.id === selected.current.id)
-      return product ? resolveCommand(data, session, command, product) : '먼저 제품명을 말해 주세요.'
+      return product ? resolveCommand(session, command, product) : '먼저 제품명을 말해 주세요.'
     }
     if (!command.name) return '제품명을 말해 주세요.'
     const matches = search(data.products, command.name)
     if (!matches.length) {
       selected.current = null
-      if (command.kind === 'add') return registerVoiceProduct(session, command)
-      return '제품을 찾지 못했어요. 제품명과 수량을 말한 뒤 추가라고 말하면 처음 등록할 수 있어요.'
+      if (canRegister(command)) return registerVoiceProduct(session, command)
+      return '제품을 찾지 못했어요. 제품명과 수량을 함께 말하면 처음 등록할 수 있어요.'
     }
     if (matches[0].score === 100 && matches[1]?.score !== 100)
-      return resolveCommand(data, session, command, matches[0].product)
+      return resolveCommand(session, command, matches[0].product)
     if (command.kind === 'lookup' && matches.length === 1 && matches[0].score === 80)
-      return resolveCommand(data, session, command, matches[0].product)
+      return resolveCommand(session, command, matches[0].product)
     selected.current = null
     const products = matches.slice(0, 6).map(item => item.product)
     setPending({ session: session.id, command, products })
     return '어떤 제품인가요? ' + products.slice(0, 3).map(item => item.name).join(', ') + '.' +
-      (command.kind === 'add' ? ' 새 품목이면 새 제품으로 등록이라고 말해 주세요.' : '')
+      (canRegister(command) ? ' 새 품목이면 새 제품으로 등록이라고 말해 주세요.' : '')
   }
 
   useEffect(() => {
@@ -218,18 +242,30 @@ function App() {
           onClick={() => voice.active ? stopVoice() : controller.current.start()}>
           <Icon name={voice.active ? 'stop' : 'mic'} size={17}/>{voice.active ? '음성 중지' : '음성 시작'}</button>
         {transcript && <p className="voice-extra">인식한 말 · {transcript}</p>}
-        {candidate && <div className="voice-extra pending">
+        {candidate?.product && <div className="voice-extra pending">
+          <strong>{candidate.product.name} · 현재 {labelQuantity(candidate.before)}</strong>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {candidate.amount > 0 && <button disabled={busy} onClick={() => run(() => selectOperation(candidate, 'add'))}>
+              {labelQuantity(candidate.amount)} 추가
+            </button>}
+            <button disabled={busy} onClick={() => run(() => selectOperation(candidate, 'set'))}>
+              {labelQuantity(candidate.amount)}로 변경
+            </button>
+            <button onClick={() => setPending(null)}>취소</button>
+          </div>
+        </div>}
+        {candidate?.products && <div className="voice-extra pending">
           <strong>제품을 선택해 주세요</strong><div className="flex flex-wrap gap-2 mt-2">
             {candidate.products.map(product => <button key={product.id} disabled={busy} onClick={() => run(async () => {
               const data = await transact()
               if (pending.current !== candidate || sessionOf(data)?.id !== candidate.session) return
               setPending(null)
               showStockProduct(product.id, candidate.session)
-              setNotice(await resolveCommand(data, sessionOf(data), candidate.command, product))
+              setNotice(await resolveCommand(sessionOf(data), candidate.command, product))
             })}>{product.name}</button>)}
           </div>
           <div className="flex flex-wrap gap-2 mt-2">
-            {candidate.command.kind === 'add' && <button disabled={busy} onClick={() => run(async () => {
+            {canRegister(candidate.command) && <button disabled={busy} onClick={() => run(async () => {
               if (pending.current !== candidate) return
               setPending(null)
               await registerVoiceProduct({ id: candidate.session }, candidate.command)
@@ -288,7 +324,7 @@ function App() {
           <div className="flex flex-wrap gap-2"><button className="primary" disabled={!state || busy} onClick={download}>백업 다운로드</button>
           <button disabled={!state} onClick={() => openDialog({ type: 'restore' })}>백업 복원</button></div>
         </div>
-        <div className="settings"><h3>음성 명령</h3><p>제품명만 말하면 수량을 읽어 줍니다. “2보루 추가”, “1보루 차감”, “3보루로 변경”은 제품이 확실하면 바로 저장합니다. 미확인 품목에 처음 추가한 수량은 첫 조사 수량으로 기록됩니다.</p><p>마이크 동의가 반복되면 Chrome 주소창 왼쪽의 사이트 정보에서 이 사이트의 마이크 권한을 확인하세요.</p></div>
+        <div className="settings"><h3>음성 명령</h3><p>제품명만 말하면 수량을 읽어 줍니다. “세 개”처럼 수량만 말하면 첫 수량으로 저장합니다. 기존 수량이 있으면 “추가” 또는 “변경”으로 답하세요. “3개 추가”나 “3개로 변경”은 바로 적용됩니다.</p><p>마이크 동의가 반복되면 Chrome 주소창 왼쪽의 사이트 정보에서 이 사이트의 마이크 권한을 확인하세요.</p></div>
       </section>}
       {!dialog && notice && <p className="notice" role="status">{notice}</p>}
     </main>

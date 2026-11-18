@@ -52,10 +52,17 @@ test('speech distinguishes names, increments, decrements, absolute counts, and i
     ['3개 추가', 'add', '', 3],
     ['한 개 차감', 'subtract', '', 1],
     ['3개로 변경', 'set', '', 3],
-    ['3개', 'unclear', undefined, undefined],
+    ['3개', 'auto', '', 3],
+    ['세 개요', 'auto', '', 3],
+    ['세 계', 'auto', '', 3],
+    ['세게', 'auto', '', 3],
+    ['두보류', 'auto', '', 2],
+    ['에쎄체인지 1미리 두 보로', 'auto', '에쎄체인지 1미리', 2],
+    ['3보로 변경', 'set', '', 3],
+    ['두보루 세보로', 'unclear', undefined, undefined],
     ['2개 추가 3개 추가', 'unclear', undefined, undefined],
     ['2.5개 추가', 'unclear', undefined, undefined],
-    ['에쎄수 두 보루', 'unclear', undefined, undefined],
+    ['에쎄수 두 보루', 'auto', '에쎄수', 2],
     ['2.5보루 추가', 'unclear', undefined, undefined],
     ['-2보루 추가', 'unclear', undefined, undefined],
   ]) {
@@ -108,5 +115,24 @@ test('a named voice addition can register a product and record its first count t
   await assert.rejects(transact(state => apply(state, action)), /이미 등록/)
   assert.equal((await transact()).products.length, 1)
   assert.equal(validateBackup(updated), updated)
+})
+
+test('an implicit quantity saves a first count and waits for an operation on counted products', () => {
+  const data = empty()
+  apply(data, { type: 'session' })
+  apply(data, { type: 'product', name: '에쎄 수 0.1', aliases: '' })
+  const product = data.products[0]
+  const session = sessionOf(data)
+  apply(data, voiceCountAction(session, product, parseSpeech('두보로')))
+  assert.equal(quantity(session, product.id), 2)
+  assert.equal(voiceCountAction(session, product, parseSpeech('세게')), null)
+  assert.equal(quantity(session, product.id), 2)
+  apply(data, voiceCountAction(session, product, parseSpeech('세 계 추가')))
+  assert.equal(quantity(session, product.id), 5)
+  apply(data, voiceCountAction(session, product, parseSpeech('세게로 변경')))
+  assert.equal(quantity(session, product.id), 3)
+  const command = parseSpeech('에쎄체인지 1미리 세 게')
+  apply(data, { ...command, type: 'voice-register', session: session.id })
+  assert.equal(quantity(session, data.products[1].id), 3)
 })
 

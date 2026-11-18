@@ -15,7 +15,9 @@ export function nextQuantity(before, kind, amount) {
 export function voiceCountAction(session, product, command) {
   const expected = quantity(session, product.id)
   const { amount } = command
-  const kind = expected === null && command.kind === 'add' && amount > 0 ? 'set' : command.kind
+  if (command.kind === 'auto' && expected !== null) return null
+  const firstCount = expected === null && (command.kind === 'auto' || (command.kind === 'add' && amount > 0))
+  const kind = firstCount ? 'set' : command.kind
   return { type: 'count', session: session.id, id: product.id, kind, amount, expected }
 }
 export function apply(state, action) {
@@ -33,7 +35,7 @@ export function apply(state, action) {
     if (!normalize(name) || name.length > 100) throw Error('제품명을 다시 말해 주세요.')
     if (state.products.some(product => normalize(product.name) === normalize(name)))
       throw Error('이미 등록된 제품입니다. 다시 말해 주세요.')
-    const after = nextQuantity(0, 'add', action.amount)
+    const after = nextQuantity(0, action.kind === 'auto' ? 'set' : 'add', action.amount)
     const id = crypto.randomUUID()
     state.products.push({ id, name, aliases: [] })
     session.events.push({ id: crypto.randomUUID(), at, product: id, before: null, after })
@@ -92,19 +94,31 @@ export function search(products, query) {
   }).filter(match => match.score).sort((a, b) => b.score - a.score)
 }
 const words = { 영:0, 한:1, 하나:1, 일:1, 두:2, 둘:2, 이:2, 세:3, 셋:3, 삼:3, 네:4, 넷:4, 사:4, 다섯:5, 오:5, 여섯:6, 육:6, 일곱:7, 칠:7, 여덟:8, 팔:8, 아홉:9, 구:9, 열:10, 십:10 }
+const cartonUnit = '(?:[보뽀]\\s*[루로러르료뤄류]|[개계게])'
+const countCommand = new RegExp(
+  '^(.*?)\\s*(\\d+|[가-힣]{1,8})\\s*' + cartonUnit +
+  '\\s*(로\\s*(?:변경|설정)|추가|차감|빼기|빼|변경|설정)?(?:\\s*(?:해\\s*줘|해\\s*주세요|요))?$'
+)
+const compoundCommand = new RegExp(cartonUnit + '\\s*(?:로\\s*)?(?:추가|차감|변경|설정|빼)')
+const trailingQuantity = new RegExp('(?:\\d+|' + Object.keys(words).join('|') + ')\\s*' + cartonUnit + '$')
 export function parseSpeech(input) {
   const line = input.normalize('NFKC').trim().replace(/[.!?。]+$/, '')
-  const match = line.match(/^(.*?)\s*(\d+|[가-힣]{1,8})\s*(?:보[루로러]|개)\s*(로\s*(?:변경|설정)|추가|차감|빼기|빼|변경|설정)?(?:\s*(?:해\s*줘|해주세요|해\s*주세요))?$/)
+  const match = line.match(countCommand)
   if (match) {
     const numeric = match[2]
     const prefix = match[1].trim()
     const amount = /^\d+$/.test(numeric) ? Number(numeric) : words[numeric]
     const verb = match[3]
-    if (!Number.isSafeInteger(amount) || !verb || /보[루로러]|개\s*(?:로\s*)?(?:추가|차감|변경|설정|빼)|[.\-+]$/.test(prefix))
-      return { kind: 'unclear' }
-    return { name: prefix, amount, kind: verb === '추가' ? 'add' : /차감|빼/.test(verb) ? 'subtract' : 'set' }
+    if (!Number.isSafeInteger(amount)) {
+      if (verb) return { kind: 'unclear' }
+    } else {
+      if (compoundCommand.test(prefix) || trailingQuantity.test(prefix) || /[.\-+]$/.test(prefix))
+        return { kind: 'unclear' }
+      if (!verb) return { name: prefix, amount, kind: 'auto' }
+      return { name: prefix, amount, kind: verb === '추가' ? 'add' : /차감|빼/.test(verb) ? 'subtract' : 'set' }
+    }
   }
-  if (/보[루로러]|추가|차감|변경|설정/.test(line)) return { kind: 'unclear' }
+  if (/추가|차감|변경|설정/.test(line)) return { kind: 'unclear' }
   return { kind: 'lookup', name: line.replace(/\s*(?:조회|수량|몇\s*개야)$/, '').trim() }
 }
 export const undoTarget = session => {
