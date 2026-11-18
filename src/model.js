@@ -76,12 +76,16 @@ function distance(a, b) {
   }
   return row[b.length]
 }
-export function search(products, query) {
-  const key = normalize(query)
+function normalizeSpokenProduct(name) {
+  return name.normalize('NFKC').trim().replace(/^s(?=$|[\s가-힣])/i, '에쎄')
+}
+export function search(products, query, { voice = false } = {}) {
+  const searchKey = voice ? value => normalize(normalizeSpokenProduct(value)) : normalize
+  const key = searchKey(query)
   if (!key) return products.map(product => ({ product, score: 0 }))
   return products.map(product => {
     const score = Math.max(...[product.name, ...product.aliases].map(value => {
-      const name = normalize(value)
+      const name = searchKey(value)
       if (name === key) return 100
       if (name.includes(key)) return 80
       const maxLength = Math.max(key.length, name.length)
@@ -119,12 +123,13 @@ export function parseSpeech(input) {
     } else {
       if (compoundCommand.test(prefix) || trailingQuantity.test(prefix) || /[.\-+]$/.test(prefix))
         return { kind: 'unclear' }
-      if (!verb) return { name: prefix, amount, kind: 'auto' }
-      return { name: prefix, amount, kind: verb === '추가' ? 'add' : /차감|빼/.test(verb) ? 'subtract' : 'set' }
+      const name = normalizeSpokenProduct(prefix)
+      if (!verb) return { name, amount, kind: 'auto' }
+      return { name, amount, kind: verb === '추가' ? 'add' : /차감|빼/.test(verb) ? 'subtract' : 'set' }
     }
   }
   if (/추가|차감|변경|설정/.test(line)) return { kind: 'unclear' }
-  return { kind: 'lookup', name: line.replace(/\s*(?:조회|수량|몇\s*개야)$/, '').trim() }
+  return { kind: 'lookup', name: normalizeSpokenProduct(line.replace(/\s*(?:조회|수량|몇\s*개야)$/, '')) }
 }
 export const undoTarget = session => {
   const events = session?.events ?? []

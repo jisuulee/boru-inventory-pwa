@@ -41,6 +41,29 @@ test('search ranks aliases, partial names, and typos', () => {
   assert.equal(search(products, '레종 프렌치 블렉')[0].product, products[0])
 })
 
+test('speech recognizes initial S as 에쎄 and preserves Latin brand names', () => {
+  const products = [
+    { name: '에쎄 체인지 1미리', aliases: [] },
+    { name: 'LBS', aliases: [] },
+    { name: 'LSS', aliases: [] },
+    { name: 'S 수', aliases: [] },
+  ]
+  assert.deepEqual(parseSpeech('S 체인지 1미리 새보러'), { kind: 'auto', name: products[0].name, amount: 3 })
+  assert.deepEqual(parseSpeech('S'), { kind: 'lookup', name: '에쎄' })
+  for (const [voice, product] of [
+    ['S체인지 1미리', products[0]], ['lbs', products[1]], ['lss', products[2]], ['에쎄 수', products[3]],
+  ]) {
+    const command = parseSpeech(voice + ' 두 보 로 추가')
+    const [match] = search(products, command.name, { voice: true })
+    assert.equal(match.score, 100)
+    assert.equal(match.product, product)
+  }
+  assert.equal(parseSpeech('lss 두 보 로').name, 'lss')
+  assert.equal(parseSpeech('스페셜 S').name, '스페셜 S')
+  assert.equal(search(products, 'S 수')[0].score, 100)
+  assert.equal(search(products, 'S 체인지 1미리').some(item => item.score === 100), false)
+})
+
 test('speech distinguishes names, increments, decrements, absolute counts, and incomplete quantities', () => {
   for (const [spoken, kind, name, amount] of [
     ['에쎄수0.1', 'lookup', '에쎄수0.1', undefined],

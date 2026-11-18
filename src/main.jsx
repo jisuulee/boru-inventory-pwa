@@ -119,7 +119,7 @@ function App() {
         setPending(null)
         return registerVoiceProduct(session, waiting.command)
       }
-      const matches = search(waiting.products, answer)
+      const matches = search(waiting.products, answer, { voice: true })
       if (matches.length && matches.filter(item => item.score === 100).length === 1) {
         setPending(null)
         return resolveCommand(session, waiting.command, matches[0].product)
@@ -134,7 +134,7 @@ function App() {
       return product ? resolveCommand(session, command, product) : '먼저 제품명을 말해 주세요.'
     }
     if (!command.name) return '제품명을 말해 주세요.'
-    const matches = search(data.products, command.name)
+    const matches = search(data.products, command.name, { voice: true })
     if (!matches.length) {
       selected.current = null
       if (canRegister(command)) return registerVoiceProduct(session, command)
