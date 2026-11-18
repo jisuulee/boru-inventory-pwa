@@ -1,0 +1,1 @@
+{"name":"boru-inventory","private":true,"type":"module","scripts":{"dev":"vite","build":"vite build","preview":"vite preview","test":"node --test"},"dependencies":{"react":"^19","react-dom":"^19"},"devDependencies":{"vite":"^7","tailwindcss":"^4","@tailwindcss/vite":"^4","fake-indexeddb":"^6"}}
