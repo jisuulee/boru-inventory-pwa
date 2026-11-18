@@ -12,6 +12,12 @@ export function nextQuantity(before, kind, amount) {
   if (!Number.isSafeInteger(after) || after < 0) throw Error('변경 후 수량이 유효 범위를 벗어납니다.')
   return after
 }
+export function voiceCountAction(session, product, command) {
+  const expected = quantity(session, product.id)
+  const { amount } = command
+  const kind = expected === null && command.kind === 'add' && amount > 0 ? 'set' : command.kind
+  return { type: 'count', session: session.id, id: product.id, kind, amount, expected }
+}
 export function apply(state, action) {
   const session = sessionOf(state)
   const at = new Date().toISOString()

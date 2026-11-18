@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import 'fake-indexeddb/auto'
-import { apply, empty, sessionOf, quantity, search, parseSpeech, undoTarget } from './model.js'
+import { apply, empty, sessionOf, quantity, search, parseSpeech, undoTarget, voiceCountAction } from './model.js'
 import { transact, validateBackup } from './db.js'
 
 test('new surveys distinguish zero from unknown and preserve prior history', () => {
@@ -69,5 +69,18 @@ test('IndexedDB serializes concurrent changes and rolls back failures', async ()
   await assert.rejects(count('subtract', 6))
   await assert.rejects(transact(state => apply(state, { ...action, kind: 'set', amount: 1, expected: 0 })), /바뀌었습니다/)
   assert.equal(quantity(sessionOf(await transact()), id), 5)
+})
+
+test('voice commands save the first addition, later increments and absolute counts', async () => {
+  const data = empty()
+  apply(data, { type: 'product', name: '에쎄 수 0.1', aliases: '' })
+  apply(data, { type: 'session' })
+  await transact(() => data)
+  const product = data.products[0]
+  for (const [speech, expected] of [['2보루 추가', 2], ['두 보루 추가', 4], ['3보루로 변경', 3], ['1보루 차감', 2]]) {
+    const action = voiceCountAction(sessionOf(await transact()), product, parseSpeech(speech))
+    await transact(state => apply(state, action))
+    assert.equal(quantity(sessionOf(await transact()), product.id), expected)
+  }
 })
 

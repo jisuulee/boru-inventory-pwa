@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { apply, sessionOf, quantity, search, parseSpeech, nextQuantity, undoTarget, labelQuantity } from './model.js'
+import { apply, sessionOf, quantity, search, parseSpeech, voiceCountAction, undoTarget, labelQuantity } from './model.js'
 import { transact, validateBackup } from './db.js'
 import { createVoice } from './voice.js'
 import './style.css'
@@ -63,23 +63,17 @@ function App() {
     const before = quantity(session, product.id)
     selected.current = { session: session.id, id: product.id }
     if (command.kind === 'lookup') return product.name + ', ' + labelQuantity(before) + '입니다.'
-    const after = nextQuantity(before, command.kind, command.amount)
-    setPending({ mode: 'change', product, session: session.id, before, after, command })
-    return product.name + ', ' + labelQuantity(before) + '에서 ' + labelQuantity(after) +
-      '로 변경할까요? 확인 또는 취소라고 말해 주세요.'
+    const updated = await commit(voiceCountAction(session, product, command))
+    const after = quantity(sessionOf(updated), product.id)
+    const message = product.name + ', ' + labelQuantity(after) + '로 저장했습니다.'
+    setNotice(message)
+    return message
   }
-  async function accept(value) {
-    if (pending.current !== value) throw Error('확인할 명령이 없습니다.')
-    setPending(null)
-    const updated = await commit({ type: 'count', session: value.session, id: value.product.id,
-      kind: value.command.kind, amount: value.command.amount, expected: value.before })
-    return value.product.name + ', ' + labelQuantity(quantity(sessionOf(updated), value.product.id)) + '입니다.'
-  }
-  async function receive(text) {
+  async function receive(text, isCurrent) {
     setTranscript(text)
     const answer = text.trim().replace(/[.!?。]+$/, '')
     const data = await transact()
-    if (!controller.current?.isActive()) return ''
+    if (!isCurrent()) return ''
     setState(data)
     const session = sessionOf(data)
     if (!session) return '먼저 새 조사를 시작해 주세요.'
@@ -87,8 +81,6 @@ function App() {
     if (waiting) {
       if (waiting.session !== session.id) { setPending(null); return '조사가 바뀌었어요. 다시 말해 주세요.' }
       if (/^(취소|아니|아니요)$/.test(answer)) { setPending(null); return '취소했습니다.' }
-      if (waiting.mode === 'change')
-        return /^(확인|네|예)$/.test(answer) ? accept(waiting) : '확인 또는 취소라고 말해 주세요.'
       const matches = search(waiting.products, answer)
       if (matches.length && matches.filter(item => item.score === 100).length === 1) {
         setPending(null)
@@ -96,7 +88,7 @@ function App() {
       }
       return '화면의 제품을 선택하거나 정확한 제품명을 말해 주세요. 취소도 가능합니다.'
     }
-    if (/^(확인|취소|네|예|아니요)$/.test(answer)) return '확인할 명령이 없습니다.'
+    if (/^(확인|취소|네|예|아니요)$/.test(answer)) return '제품명이나 수량 명령을 말해 주세요.'
     const command = parseSpeech(answer)
     if (command.kind === 'unclear') return '수량과 동작을 다시 말해 주세요. 예를 들어, 두 보루 추가.'
     if (!command.name && command.kind !== 'lookup') {
@@ -112,7 +104,7 @@ function App() {
       return resolveCommand(data, session, command, matches[0].product)
     selected.current = null
     const products = matches.slice(0, 6).map(item => item.product)
-    setPending({ mode: 'choose', session: session.id, command, products })
+    setPending({ session: session.id, command, products })
     return '어떤 제품인가요? ' + products.slice(0, 3).map(item => item.name).join(', ') + '.'
   }
 
@@ -196,17 +188,14 @@ function App() {
           <Icon name={voice.active ? 'stop' : 'mic'} size={17}/>{voice.active ? '음성 중지' : '음성 시작'}</button>
         {transcript && <p className="voice-extra">인식한 말 · {transcript}</p>}
         {candidate && <div className="voice-extra pending">
-          {candidate.mode === 'change' ? <>
-            <strong>{candidate.product.name} · {labelQuantity(candidate.before)} → {labelQuantity(candidate.after)}</strong>
-            <div className="flex gap-2 mt-2"><button className="primary" disabled={busy} onClick={() => run(async () => setNotice(await accept(candidate)))}>확인</button></div>
-          </> : <><strong>제품을 선택해 주세요</strong><div className="flex flex-wrap gap-2 mt-2">
-            {candidate.products.map(product => <button key={product.id} onClick={() => run(async () => {
+          <strong>제품을 선택해 주세요</strong><div className="flex flex-wrap gap-2 mt-2">
+            {candidate.products.map(product => <button key={product.id} disabled={busy} onClick={() => run(async () => {
               const data = await transact()
               if (pending.current !== candidate || sessionOf(data)?.id !== candidate.session) return
               setPending(null)
               setNotice(await resolveCommand(data, sessionOf(data), candidate.command, product))
             })}>{product.name}</button>)}
-          </div></>}
+          </div>
           <button className="mt-2" onClick={() => setPending(null)}>취소</button>
         </div>}
       </section>
@@ -259,7 +248,7 @@ function App() {
           <div className="flex flex-wrap gap-2"><button className="primary" disabled={!state || busy} onClick={download}>백업 다운로드</button>
           <button disabled={!state} onClick={() => openDialog({ type: 'restore' })}>백업 복원</button></div>
         </div>
-        <div className="settings"><h3>음성 명령</h3><p>제품명만 말하면 수량을 읽어 줍니다. 수량을 바꾸려면 “2보루 추가”, “1보루 차감”, “3보루로 변경”이라고 말한 다음 “확인”이라고 말하세요.</p></div>
+        <div className="settings"><h3>음성 명령</h3><p>제품명만 말하면 수량을 읽어 줍니다. “2보루 추가”, “1보루 차감”, “3보루로 변경”은 제품이 확실하면 바로 저장합니다. 미확인 품목에 처음 추가한 수량은 첫 조사 수량으로 기록됩니다.</p><p>마이크 동의가 반복되면 Chrome 주소창 왼쪽의 사이트 정보에서 이 사이트의 마이크 권한을 확인하세요.</p></div>
       </section>}
       {!dialog && notice && <p className="notice" role="status">{notice}</p>}
     </main>
