@@ -94,17 +94,17 @@ export function search(products, query) {
 const words = { 영:0, 한:1, 하나:1, 일:1, 두:2, 둘:2, 이:2, 세:3, 셋:3, 삼:3, 네:4, 넷:4, 사:4, 다섯:5, 오:5, 여섯:6, 육:6, 일곱:7, 칠:7, 여덟:8, 팔:8, 아홉:9, 구:9, 열:10, 십:10 }
 export function parseSpeech(input) {
   const line = input.normalize('NFKC').trim().replace(/[.!?。]+$/, '')
-  const match = line.match(/^(.*?)\s*(\d+|[가-힣]{1,8})\s*보루\s*(로\s*(?:변경|설정)|추가|차감|빼기|빼|변경|설정)?(?:\s*(?:해\s*줘|해주세요|해\s*주세요))?$/)
+  const match = line.match(/^(.*?)\s*(\d+|[가-힣]{1,8})\s*(?:보[루로러]|개)\s*(로\s*(?:변경|설정)|추가|차감|빼기|빼|변경|설정)?(?:\s*(?:해\s*줘|해주세요|해\s*주세요))?$/)
   if (match) {
     const numeric = match[2]
     const prefix = match[1].trim()
     const amount = /^\d+$/.test(numeric) ? Number(numeric) : words[numeric]
     const verb = match[3]
-    if (!Number.isSafeInteger(amount) || !verb || /보루|[.\-+]$/.test(prefix))
+    if (!Number.isSafeInteger(amount) || !verb || /보[루로러]|개\s*(?:로\s*)?(?:추가|차감|변경|설정|빼)|[.\-+]$/.test(prefix))
       return { kind: 'unclear' }
     return { name: prefix, amount, kind: verb === '추가' ? 'add' : /차감|빼/.test(verb) ? 'subtract' : 'set' }
   }
-  if (/보루|추가|차감|변경|설정/.test(line)) return { kind: 'unclear' }
+  if (/보[루로러]|추가|차감|변경|설정/.test(line)) return { kind: 'unclear' }
   return { kind: 'lookup', name: line.replace(/\s*(?:조회|수량|몇\s*개야)$/, '').trim() }
 }
 export const undoTarget = session => {
