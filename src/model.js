@@ -27,6 +27,16 @@ export function apply(state, action) {
   } else if (action.type === 'select') {
     if (!state.sessions.some(item => item.id === action.id)) throw Error('조사를 찾을 수 없습니다.')
     state.active = action.id
+  } else if (action.type === 'voice-register') {
+    if (!session || session.id !== action.session) throw Error('조사가 바뀌었습니다. 다시 시도해 주세요.')
+    const name = action.name.trim()
+    if (!normalize(name) || name.length > 100) throw Error('제품명을 다시 말해 주세요.')
+    if (state.products.some(product => normalize(product.name) === normalize(name)))
+      throw Error('이미 등록된 제품입니다. 다시 말해 주세요.')
+    const after = nextQuantity(0, 'add', action.amount)
+    const id = crypto.randomUUID()
+    state.products.push({ id, name, aliases: [] })
+    session.events.push({ id: crypto.randomUUID(), at, product: id, before: null, after })
   } else if (action.type === 'product') {
     const name = action.name.trim()
     if (!normalize(name)) throw Error('제품명을 입력해 주세요.')

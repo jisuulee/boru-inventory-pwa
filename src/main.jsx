@@ -69,6 +69,14 @@ function App() {
     setNotice(message)
     return message
   }
+  async function registerVoiceProduct(session, command) {
+    const updated = await commit({ type: 'voice-register', session: session.id, name: command.name, amount: command.amount })
+    const product = updated.products.at(-1)
+    selected.current = { session: session.id, id: product.id }
+    const message = product.name + ', 새 제품으로 등록하고 ' + labelQuantity(command.amount) + ' 저장했습니다.'
+    setNotice(message)
+    return message
+  }
   async function receive(text, isCurrent) {
     setTranscript(text)
     const answer = text.trim().replace(/[.!?。]+$/, '')
@@ -81,6 +89,10 @@ function App() {
     if (waiting) {
       if (waiting.session !== session.id) { setPending(null); return '조사가 바뀌었어요. 다시 말해 주세요.' }
       if (/^(취소|아니|아니요)$/.test(answer)) { setPending(null); return '취소했습니다.' }
+      if (waiting.command.kind === 'add' && /^(새\s*제품(으로)?\s*등록|신규\s*등록)$/.test(answer)) {
+        setPending(null)
+        return registerVoiceProduct(session, waiting.command)
+      }
       const matches = search(waiting.products, answer)
       if (matches.length && matches.filter(item => item.score === 100).length === 1) {
         setPending(null)
@@ -97,7 +109,11 @@ function App() {
     }
     if (!command.name) return '제품명을 말해 주세요.'
     const matches = search(data.products, command.name)
-    if (!matches.length) { selected.current = null; return '제품을 찾지 못했어요. 이름을 다시 말해 주세요.' }
+    if (!matches.length) {
+      selected.current = null
+      if (command.kind === 'add') return registerVoiceProduct(session, command)
+      return '제품을 찾지 못했어요. 제품명과 수량을 말한 뒤 추가라고 말하면 처음 등록할 수 있어요.'
+    }
     if (matches[0].score === 100 && matches[1]?.score !== 100)
       return resolveCommand(data, session, command, matches[0].product)
     if (command.kind === 'lookup' && matches.length === 1 && matches[0].score === 80)
@@ -105,7 +121,8 @@ function App() {
     selected.current = null
     const products = matches.slice(0, 6).map(item => item.product)
     setPending({ session: session.id, command, products })
-    return '어떤 제품인가요? ' + products.slice(0, 3).map(item => item.name).join(', ') + '.'
+    return '어떤 제품인가요? ' + products.slice(0, 3).map(item => item.name).join(', ') + '.' +
+      (command.kind === 'add' ? ' 새 품목이면 새 제품으로 등록이라고 말해 주세요.' : '')
   }
 
   useEffect(() => {
@@ -196,7 +213,14 @@ function App() {
               setNotice(await resolveCommand(data, sessionOf(data), candidate.command, product))
             })}>{product.name}</button>)}
           </div>
-          <button className="mt-2" onClick={() => setPending(null)}>취소</button>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {candidate.command.kind === 'add' && <button disabled={busy} onClick={() => run(async () => {
+              if (pending.current !== candidate) return
+              setPending(null)
+              await registerVoiceProduct({ id: candidate.session }, candidate.command)
+            })}>새 제품으로 등록</button>}
+            <button onClick={() => setPending(null)}>취소</button>
+          </div>
         </div>}
       </section>
       <nav aria-label="메뉴" className="tabs">

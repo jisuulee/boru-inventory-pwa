@@ -84,3 +84,21 @@ test('voice commands save the first addition, later increments and absolute coun
   }
 })
 
+test('a named voice addition can register a product and record its first count together', async () => {
+  const data = empty()
+  apply(data, { type: 'session' })
+  await transact(() => data)
+  const command = parseSpeech('에쎄체인지 1미리 두보루 추가')
+  assert.deepEqual(command, { name: '에쎄체인지 1미리', kind: 'add', amount: 2 })
+  const action = { ...command, type: 'voice-register', session: data.active }
+  await assert.rejects(transact(state => apply(state, { ...action, amount: 0 })))
+  assert.deepEqual((await transact()).products, [])
+  const updated = await transact(state => apply(state, action))
+  const [product] = updated.products
+  assert.equal(product.name, command.name)
+  assert.equal(quantity(sessionOf(updated), product.id), 2)
+  await assert.rejects(transact(state => apply(state, action)), /이미 등록/)
+  assert.equal((await transact()).products.length, 1)
+  assert.equal(validateBackup(updated), updated)
+})
+
