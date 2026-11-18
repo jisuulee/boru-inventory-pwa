@@ -22,6 +22,7 @@ function App() {
   const [tab, setTab] = useState('stock')
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('all')
+  const [featured, setFeatured] = useState(null)
   const [dialog, setDialog] = useState(null)
   const [candidate, setCandidate] = useState(null)
   const [notice, setNotice] = useState('')
@@ -33,6 +34,7 @@ function App() {
   const selected = useRef(null)
   const controller = useRef(null)
   const modal = useRef(null)
+  const featuredRow = useRef(null)
   const busyRef = useRef(false)
   const channel = useRef(null)
 
@@ -159,6 +161,9 @@ function App() {
     if (dialog) modal.current?.showModal()
     else modal.current?.close()
   }, [dialog])
+  useEffect(() => {
+    if (featured) featuredRow.current?.scrollIntoView({ block: 'nearest' })
+  }, [featured])
 
   const session = state && sessionOf(state)
   const products = state?.products ?? []
@@ -167,10 +172,19 @@ function App() {
   const progress = products.length ? Math.round(checked / products.length * 100) : 0
   const matches = search(products, query).map(({ product }) => product).filter(product =>
     tab !== 'stock' || filter === 'all' || (counts.get(product.id) != null) === (filter === 'checked'))
+  const featuredId = tab === 'stock' && featured?.session === session?.id ? featured?.id : undefined
+  const featuredIndex = matches.findIndex(product => product.id === featuredId)
+  if (featuredIndex > 0) matches.unshift(...matches.splice(featuredIndex, 1))
   const undo = undoTarget(session)
 
   function openDialog(value) { stopVoice(); setNotice(''); setDialog(value) }
   function switchTab(value) { setTab(value); setQuery(''); setNotice('') }
+  function showStockProduct(id, sessionId) {
+    setTab('stock')
+    setQuery('')
+    setFilter('all')
+    setFeatured({ id, session: sessionId })
+  }
   function download() {
     return run(async () => {
       const backup = await transact()
@@ -210,6 +224,7 @@ function App() {
               const data = await transact()
               if (pending.current !== candidate || sessionOf(data)?.id !== candidate.session) return
               setPending(null)
+              showStockProduct(product.id, candidate.session)
               setNotice(await resolveCommand(data, sessionOf(data), candidate.command, product))
             })}>{product.name}</button>)}
           </div>
@@ -234,7 +249,8 @@ function App() {
         {tab === 'stock' && <div className="filters">{[['all','전체'], ['unchecked','미확인'], ['checked','확인 완료']].map(([key, label]) =>
           <button key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}</button>)}</div>}
         <div className="list">
-          {matches.map(product => <article className="row" key={product.id}>
+          {matches.map(product => <article className={product.id === featuredId ? 'row featured' : 'row'}
+            ref={product.id === featuredId ? featuredRow : undefined} key={product.id}>
             <span className="item-icon"><Icon name="box" size={19}/></span>
             <div className="grow min-w-0"><h3>{product.name}</h3>{product.aliases.length > 0 && <p>{product.aliases.join(' · ')}</p>}</div>
             {tab === 'stock' ? <>

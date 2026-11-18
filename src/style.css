@@ -44,6 +44,7 @@ main.shell { padding-block: 20px 44px; }
 .list { display:grid; gap:8px; margin-top:12px; }
 .row,.settings,.empty { background:white; border:1px solid #dbe6de; border-radius:13px; padding:12px; }
 .row { display:flex; align-items:center; gap:9px; }
+.row.featured { border-color: #4d9476; background: #f0f8f2; }
 .row strong { font-size: .82rem; overflow-wrap:anywhere; max-width: 40%; }
 .row .count,.row .unknown { padding:4px 7px; border-radius:6px; background:#e4f3e8; color:#225940; }
 .row .unknown { background:#eef1ef; color:#52635b; }
