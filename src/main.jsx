@@ -6,7 +6,6 @@ import { cloudStore, isAccountId } from './cloud.js'
 import { createVoice } from './voice.js'
 import './style.css'
 
-const verbs = { set: '수량 설정', add: '추가', subtract: '차감' }
 const canRegister = command => command.kind === 'add' || command.kind === 'auto'
 const date = value => new Date(value).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })
 const icons = {
@@ -26,6 +25,7 @@ function App({ account, accountControl, transact }) {
   const [filter, setFilter] = useState('all')
   const [featured, setFeatured] = useState(null)
   const [dialog, setDialog] = useState(null)
+  const [countInput, setCountInput] = useState('')
   const [candidate, setCandidate] = useState(null)
   const [notice, setNotice] = useState('')
   const [voice, setVoice] = useState({ message: '음성이 꺼져 있어요', active: false })
@@ -202,7 +202,14 @@ function App({ account, accountControl, transact }) {
   if (featuredIndex > 0) matches.unshift(...matches.splice(featuredIndex, 1))
   const undo = undoTarget(session)
 
-  function openDialog(value) { stopVoice(); setNotice(''); setDialog(value) }
+  function openDialog(value) {
+    stopVoice()
+    setNotice('')
+    if (value.type === 'count') setCountInput(value.before === null ? '' : String(value.before))
+    setDialog(value)
+  }
+  const countValue = countInput === '' ? 0 : Number(countInput)
+  const validCount = /^\d*$/.test(countInput) && Number.isSafeInteger(countValue) && countValue >= 0
   function switchTab(value) { setTab(value); setQuery(''); setNotice('') }
   function showStockProduct(id, sessionId) {
     setTab('stock')
@@ -355,7 +362,7 @@ function App({ account, accountControl, transact }) {
             setNotice('제품을 저장했습니다.')
           } else if (dialog.type === 'count') {
             await commit({ type: 'count', session: dialog.session, id: dialog.product.id, expected: dialog.before,
-              kind: form.get('kind'), amount: Number(form.get('amount')) })
+              kind: 'set', amount: Number(form.get('amount')) })
             setNotice('수량을 저장했습니다.')
           } else {
             const file = form.get('backup')
@@ -376,9 +383,18 @@ function App({ account, accountControl, transact }) {
         </>}
         {dialog.type === 'count' && <>
           <p>현재 수량 · {labelQuantity(dialog.before)}</p>
-          <label className="field">동작<select name="kind">{Object.entries(verbs).map(([key, label]) =>
-            <option key={key} value={key} disabled={key !== 'set' && dialog.before === null}>{label}</option>)}</select></label>
-          <label className="field">보루 수량<input name="amount" type="number" inputMode="numeric" min="0" step="1" max={Number.MAX_SAFE_INTEGER} required /></label>
+          <div className="count-stepper">
+            <button type="button" aria-label="1보루 빼기" disabled={busy || !validCount || countValue === 0}
+              onClick={() => setCountInput(String(countValue - 1))}>−</button>
+            <label className="field">
+              <span className="sr-only">보루 수량</span>
+              <input name="amount" type="text" inputMode="numeric" pattern="[0-9]+" value={countInput}
+                placeholder="수량" onFocus={event => event.currentTarget.select()}
+                onChange={event => setCountInput(event.target.value)} required disabled={busy}/>
+            </label>
+            <button type="button" aria-label="1보루 더하기" disabled={busy || !validCount || countValue === Number.MAX_SAFE_INTEGER}
+              onClick={() => setCountInput(String(countValue + 1))}>+</button>
+          </div>
         </>}
         {dialog.type === 'restore' && <>
           <p>현재 기기의 제품, 조사, 변경 이력이 백업 파일의 내용으로 교체됩니다.</p>
@@ -386,7 +402,7 @@ function App({ account, accountControl, transact }) {
         </>}
         {notice && <p className="notice" role="alert">{notice}</p>}
         <div className="actions"><button type="button" disabled={busy} onClick={() => { setNotice(''); setDialog(null) }}>취소</button>
-          <button className="primary" disabled={busy}>{dialog.type === 'session' ? '시작' : dialog.type === 'restore' ? '교체 및 복원' : '저장'}</button></div>
+          <button className="primary" disabled={busy || (dialog.type === 'count' && (!validCount || countInput === ''))}>{dialog.type === 'session' ? '시작' : dialog.type === 'restore' ? '교체 및 복원' : '저장'}</button></div>
       </form>}
     </dialog>
   </>
