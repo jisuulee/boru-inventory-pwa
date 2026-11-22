@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { apply, sessionOf, quantity, search, parseSpeech, voiceCountAction, undoTarget, labelQuantity } from './model.js'
-import { transact, validateBackup } from './db.js'
+import { transact as localTransact, validateBackup } from './db.js'
+import { cloudStore, isAccountId } from './cloud.js'
 import { createVoice } from './voice.js'
 import './style.css'
 
@@ -18,7 +19,7 @@ const icons = {
 function Icon({ name, size = 20 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={icons[name]}/></svg>
 }
-function App() {
+function App({ account, accountControl, transact }) {
   const [state, setState] = useState(null)
   const [tab, setTab] = useState('stock')
   const [query, setQuery] = useState('')
@@ -165,7 +166,7 @@ function App() {
       if (mounted) setNotice(error.message)
     })
     refresh()
-    channel.current = typeof BroadcastChannel === 'function' ? new BroadcastChannel('boru-data') : null
+    channel.current = !account && typeof BroadcastChannel === 'function' ? new BroadcastChannel('boru-data') : null
     if (channel.current) channel.current.onmessage = refresh
     const visibility = () => { if (document.hidden) stopVoice('화면을 벗어나 음성을 중지했어요.') }
     document.addEventListener('visibilitychange', visibility)
@@ -227,6 +228,7 @@ function App() {
       <span className="local"><i/>{offlineReady ? '오프라인 준비 완료' : '기기 저장'}</span>
     </div></header>
     <main className="shell">
+      {accountControl}
       <section className="hero">
         <div className="flex flex-wrap justify-between items-start gap-3">
           <div><p className="eyebrow">조사 진행률</p><h2>{checked}<small> / {products.length}개 확인</small></h2></div>
@@ -321,6 +323,17 @@ function App() {
       {tab === 'backup' && <section>
         <div className="heading"><h2>백업 및 복원</h2></div>
         <div className="settings"><p>제품, 조사, 변경 이력을 JSON 파일로 보관할 수 있어요.</p>
+          {account && <button disabled={busy} onClick={() => run(async () => {
+            stopVoice()
+            const local = await localTransact()
+            if (!local.products.length && !local.sessions.length) throw Error('이 기기에 옮길 기록이 없습니다.')
+            const updated = await transact(current => {
+              if (current.products.length || current.sessions.length) throw Error('아이디에 이미 기록이 있습니다.')
+              return validateBackup(local)
+            })
+            setState(updated)
+            setNotice('이 기기의 기록을 서버에 저장했습니다.')
+          })}>이 기기의 기존 기록 가져오기</button>}
           <div className="flex flex-wrap gap-2"><button className="primary" disabled={!state || busy} onClick={download}>백업 다운로드</button>
           <button disabled={!state} onClick={() => openDialog({ type: 'restore' })}>백업 복원</button></div>
         </div>
@@ -378,5 +391,66 @@ function App() {
     </dialog>
   </>
 }
-createRoot(document.getElementById('root')).render(<App/>)
+function Inventory() {
+  const [account, setAccount] = useState(() => {
+    try {
+      const saved = localStorage.getItem('boru-account')
+      return isAccountId(saved) ? saved : null
+    } catch { return null }
+  })
+  const [formOpen, setFormOpen] = useState(false)
+  const [input, setInput] = useState('')
+  const [error, setError] = useState('')
+  const [connecting, setConnecting] = useState(false)
+  const transact = React.useMemo(() => account ? cloudStore(account) : localTransact, [account])
+
+  function remember(value) {
+    try {
+      if (value) localStorage.setItem('boru-account', value)
+      else localStorage.removeItem('boru-account')
+    } catch {}
+    setAccount(value)
+    setInput('')
+    setFormOpen(false)
+  }
+  async function signIn(event) {
+    event.preventDefault()
+    if (connecting) return
+    const value = input.normalize('NFKC').trim()
+    if (!isAccountId(value)) {
+      setError('공백 없이 8~64자의 문자, 숫자, 밑줄, 하이픈을 입력해 주세요.')
+      return
+    }
+    setError('')
+    setConnecting(true)
+    try {
+      await cloudStore(value)()
+      remember(value)
+    } catch (failure) { setError(failure.message) }
+    finally { setConnecting(false) }
+  }
+  const accountControl = <section className="settings" aria-label="서버 저장">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <strong>{account ? '서버 저장 사용 중' : '이 기기에 저장 중'}</strong>
+      {account ? <button onClick={() => remember(null)}>로그아웃</button>
+        : <button onClick={() => { setFormOpen(value => !value); setError('') }}>{formOpen ? '닫기' : '아이디로 로그인'}</button>}
+    </div>
+    {formOpen && <form className="grid gap-2" onSubmit={signIn}>
+      <label className="field">저장 아이디
+        <input value={input} onChange={event => setInput(event.target.value)} autoCapitalize="none"
+          autoComplete="off" spellCheck={false} maxLength={64} required disabled={connecting}/>
+      </label>
+      <p>같은 아이디를 입력하면 여러 기기에서 재고를 불러옵니다. 아이디를 아는 사람도 열 수 있으니 따로 보관하세요.</p>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" disabled={connecting} onClick={() => setInput(crypto.randomUUID())}>임의 아이디 만들기</button>
+        <button className="primary" disabled={connecting}>{connecting ? '연결 중…' : '로그인'}</button>
+      </div>
+      {error && <p role="alert">{error}</p>}
+    </form>}
+    {account && <details><summary>저장 아이디 보기</summary><code className="break-all">{account}</code></details>}
+  </section>
+  return <App key={account ?? ''} account={account} accountControl={accountControl} transact={transact}/>
+}
+
+createRoot(document.getElementById('root')).render(<Inventory/>)
 
