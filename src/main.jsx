@@ -418,7 +418,7 @@ function Inventory() {
     if (connecting) return
     const value = input.normalize('NFKC').trim()
     if (!isAccountId(value)) {
-      setError('공백 없이 8~64자의 문자, 숫자, 밑줄, 하이픈을 입력해 주세요.')
+      setError('저장 아이디를 입력해 주세요.')
       return
     }
     setError('')
@@ -438,7 +438,7 @@ function Inventory() {
     {formOpen && <form className="grid gap-2" onSubmit={signIn}>
       <label className="field">저장 아이디
         <input value={input} onChange={event => setInput(event.target.value)} autoCapitalize="none"
-          autoComplete="off" spellCheck={false} maxLength={64} required disabled={connecting}/>
+          autoComplete="off" spellCheck={false} required disabled={connecting}/>
       </label>
       <p>같은 아이디를 입력하면 여러 기기에서 재고를 불러옵니다. 아이디를 아는 사람도 열 수 있으니 따로 보관하세요.</p>
       <div className="flex flex-wrap gap-2">

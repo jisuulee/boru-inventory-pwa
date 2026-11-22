@@ -1,5 +1,5 @@
 export const cloudOrigin = 'https://boru-inventory-pwa.smilingcheetah1.chatgpt.site'
-export const isAccountId = value => typeof value === 'string' && /^[\p{L}\p{N}_-]{8,64}$/u.test(value)
+export const isAccountId = value => typeof value === 'string' && value.trim().length > 0
 export function cloudStore(account) {
   async function request(data) {
     let response
