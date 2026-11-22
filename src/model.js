@@ -39,6 +39,14 @@ export function apply(state, action) {
     const id = crypto.randomUUID()
     state.products.push({ id, name, aliases: [] })
     session.events.push({ id: crypto.randomUUID(), at, product: id, before: null, after })
+  } else if (action.type === 'reorder-products') {
+    const products = new Map(state.products.map(product => [product.id, product]))
+    if (action.before.length !== state.products.length ||
+        state.products.some((product, index) => product.id !== action.before[index]))
+      throw Error('제품 목록이 바뀌었어요. 순서 편집을 다시 열어 주세요.')
+    if (action.ids.length !== products.size || new Set(action.ids).size !== products.size ||
+        action.ids.some(id => !products.has(id))) throw Error('제품 순서를 확인해 주세요.')
+    state.products = action.ids.map(id => products.get(id))
   } else if (action.type === 'product') {
     const name = action.name.trim()
     if (!normalize(name)) throw Error('제품명을 입력해 주세요.')

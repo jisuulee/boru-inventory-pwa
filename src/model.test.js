@@ -41,6 +41,18 @@ test('search ranks aliases, partial names, and typos', () => {
   assert.equal(search(products, '레종 프렌치 블렉')[0].product, products[0])
 })
 
+test('manual product order persists and rejects a stale or incomplete reorder', async () => {
+  const data = empty()
+  for (const name of ['가 제품', '나 제품', '다 제품']) apply(data, { type: 'product', name, aliases: '' })
+  const before = data.products.map(product => product.id)
+  await transact(() => data)
+  const ids = [before[2], before[0], before[1]]
+  await assert.rejects(transact(state => apply(state, { type: 'reorder-products', before, ids: [before[0]] })))
+  await transact(state => apply(state, { type: 'reorder-products', before, ids }))
+  await assert.rejects(transact(state => apply(state, { type: 'reorder-products', before, ids })), /목록이 바뀌었어요/)
+  assert.deepEqual(validateBackup(await transact()).products.map(product => product.id), ids)
+})
+
 test('speech recognizes initial S as 에쎄 and preserves Latin brand names', () => {
   const products = [
     { name: '에쎄 체인지 1미리', aliases: [] },
