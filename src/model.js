@@ -1,6 +1,12 @@
 export const empty = () => ({ version: 1, products: [], sessions: [], active: null })
 export const normalize = value => value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
 export const sessionOf = state => state.sessions.find(session => session.id === state.active)
+export function moveProductOrder(ids, id, target, after) {
+  if (id === target || !ids.includes(id) || !ids.includes(target)) return ids
+  const next = ids.filter(item => item !== id)
+  next.splice(next.indexOf(target) + Number(after), 0, id)
+  return next.every((item, index) => item === ids[index]) ? ids : next
+}
 export function quantity(session, id) {
   return session?.events.findLast(event => event.product === id)?.after ?? null
 }
@@ -43,7 +49,7 @@ export function apply(state, action) {
     const products = new Map(state.products.map(product => [product.id, product]))
     if (action.before.length !== state.products.length ||
         state.products.some((product, index) => product.id !== action.before[index]))
-      throw Error('제품 목록이 바뀌었어요. 순서 편집을 다시 열어 주세요.')
+      throw Error('제품 목록이 바뀌었어요. 목록을 다시 열고 순서를 바꿔 주세요.')
     if (action.ids.length !== products.size || new Set(action.ids).size !== products.size ||
         action.ids.some(id => !products.has(id))) throw Error('제품 순서를 확인해 주세요.')
     state.products = action.ids.map(id => products.get(id))

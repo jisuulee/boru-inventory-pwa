@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { apply, sessionOf, quantity, search, parseSpeech, voiceCountAction, undoTarget, labelQuantity } from './model.js'
+import { apply, sessionOf, quantity, search, parseSpeech, voiceCountAction, undoTarget, labelQuantity, moveProductOrder } from './model.js'
 import { transact as localTransact, validateBackup } from './db.js'
 import { cloudStore, isAccountId } from './cloud.js'
 import { createVoice } from './voice.js'
+import { useInventoryDrag } from './inventory-drag.js'
 import './style.css'
 
 const canRegister = command => command.kind === 'add' || command.kind === 'auto'
@@ -26,7 +27,6 @@ function App({ account, accountControl, transact }) {
   const [featured, setFeatured] = useState(null)
   const [dialog, setDialog] = useState(null)
   const [countInput, setCountInput] = useState('')
-  const [orderDraft, setOrderDraft] = useState([])
   const [candidate, setCandidate] = useState(null)
   const [notice, setNotice] = useState('')
   const [voice, setVoice] = useState({ message: '음성이 꺼져 있어요', active: false })
@@ -202,24 +202,32 @@ function App({ account, accountControl, transact }) {
   const featuredIndex = matches.findIndex(product => product.id === featuredId)
   if (featuredIndex > 0) matches.unshift(...matches.splice(featuredIndex, 1))
   const undo = undoTarget(session)
+  const canReorder = tab === 'stock' && !query.trim() && matches.length > 1 && !busy && !dialog
+  const { list: stockList, preview: drag } = useInventoryDrag(saveProductOrder, canReorder)
+
+  function saveProductOrder(id, target, after) {
+    const before = products.map(product => product.id)
+    const ids = moveProductOrder(before, id, target, after)
+    if (ids === before) return
+    return run(async () => {
+      stopVoice()
+      try {
+        await commit({ type: 'reorder-products', before, ids })
+        setFeatured(null)
+        setNotice('재고 목록 순서를 저장했습니다.')
+      } catch (error) {
+        const current = await transact().catch(() => null)
+        if (current) setState(current)
+        throw error
+      }
+    })
+  }
 
   function openDialog(value) {
     stopVoice()
     setNotice('')
     if (value.type === 'count') setCountInput(value.before === null ? '' : String(value.before))
-    if (value.type === 'order') setOrderDraft(value.products)
     setDialog(value)
-  }
-  function moveProduct(id, destination) {
-    setOrderDraft(items => {
-      const index = items.findIndex(product => product.id === id)
-      if (index < 0 || !Number.isInteger(destination) || destination < 0 || destination >= items.length ||
-          destination === index) return items
-      const next = items.slice()
-      const [product] = next.splice(index, 1)
-      next.splice(destination, 0, product)
-      return next
-    })
   }
   const countValue = countInput === '' ? 0 : Number(countInput)
   const validCount = /^\d*$/.test(countInput) && Number.isSafeInteger(countValue) && countValue >= 0
@@ -304,16 +312,28 @@ function App({ account, accountControl, transact }) {
       {(tab === 'stock' || tab === 'catalog') && <section>
         <div className="heading"><h2>{tab === 'stock' ? '재고 목록' : '제품 카탈로그'}</h2>
           <div className="flex flex-wrap justify-end gap-2">
-            {tab === 'stock' && <button disabled={products.length < 2}
-              onClick={() => openDialog({ type: 'order', products })}>순서 편집</button>}
             <button disabled={!state} onClick={() => openDialog({ type: 'product' })}><Icon name="plus" size={17}/>제품 추가</button>
           </div>
         </div>
         <label className="search"><Icon name="search"/><input aria-label="제품명 검색" placeholder="제품명 또는 별칭 검색" value={query} onChange={event => setQuery(event.target.value)}/></label>
         {tab === 'stock' && <div className="filters">{[['all','전체'], ['unchecked','미확인'], ['checked','확인 완료']].map(([key, label]) =>
           <button key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}</button>)}</div>}
-        <div className="list">
-          {matches.map(product => <article className={product.id === featuredId ? 'row featured' : 'row'}
+        {canReorder && <p className="order-hint">제품을 꾹 누른 채 끌어서 순서 변경</p>}
+        <div className="list" ref={stockList}>
+          {matches.map((product, index) => <article className={['row', product.id === featuredId && 'featured',
+            drag?.id === product.id && 'dragging', drag?.target === product.id && drag.id !== product.id &&
+              (drag.after ? 'drop-after' : 'drop-before')].filter(Boolean).join(' ')}
+            data-order-id={canReorder ? product.id : undefined} tabIndex={canReorder ? 0 : undefined}
+            aria-keyshortcuts={canReorder ? 'Alt+ArrowUp Alt+ArrowDown' : undefined}
+            onKeyDown={event => {
+              if (!canReorder || event.target !== event.currentTarget || !event.altKey ||
+                  !['ArrowUp', 'ArrowDown'].includes(event.key)) return
+              const after = event.key === 'ArrowDown'
+              const target = matches[index + (after ? 1 : -1)]
+              if (!target) return
+              event.preventDefault()
+              saveProductOrder(product.id, target.id, after)
+            }}
             ref={product.id === featuredId ? featuredRow : undefined} key={product.id}>
             <span className="item-icon"><Icon name="box" size={19}/></span>
             <div className="grow min-w-0"><h3>{product.name}</h3>{product.aliases.length > 0 && <p>{product.aliases.join(' · ')}</p>}</div>
@@ -379,13 +399,6 @@ function App({ account, accountControl, transact }) {
           } else if (dialog.type === 'product') {
             await commit({ type: 'product', id: dialog.product?.id, name: form.get('name'), aliases: form.get('aliases') })
             setNotice('제품을 저장했습니다.')
-          } else if (dialog.type === 'order') {
-            await commit({ type: 'reorder-products', before: dialog.products.map(product => product.id),
-              ids: orderDraft.map(product => product.id) })
-            setFeatured(null)
-            setQuery('')
-            setFilter('all')
-            setNotice('재고 목록 순서를 저장했습니다.')
           } else if (dialog.type === 'count') {
             await commit({ type: 'count', session: dialog.session, id: dialog.product.id, expected: dialog.before,
               kind: 'set', amount: Number(form.get('amount')) })
@@ -401,32 +414,7 @@ function App({ account, accountControl, transact }) {
           setDialog(null)
         })
       }}>
-        <h2>{{ session: '새 조사 시작', product: dialog.product ? '제품 수정' : '제품 추가', count: dialog.product?.name, restore: '백업 복원', order: '재고 목록 순서 편집' }[dialog.type]}</h2>
-        {dialog.type === 'order' && <>
-          <p>위아래 버튼을 누르거나 원하는 순번을 입력하세요.</p>
-          <ol className="order-list">
-            {orderDraft.map((product, index) => <li key={product.id} className="row">
-              <label className="field order-position">
-                <span className="sr-only">{product.name} 순번</span>
-                <input key={index} type="text" inputMode="numeric" defaultValue={index + 1} disabled={busy}
-                  onFocus={event => event.currentTarget.select()}
-                  onBlur={event => {
-                    const input = event.currentTarget
-                    moveProduct(product.id, Number(input.value) - 1)
-                    input.value = String(index + 1)
-                  }}
-                  onKeyDown={event => {
-                    if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() }
-                  }}/>
-              </label>
-              <span className="min-w-0 grow break-words">{product.name}</span>
-              <button type="button" aria-label={product.name + ' 위로 이동'} disabled={busy || index === 0}
-                onClick={() => moveProduct(product.id, index - 1)}>↑</button>
-              <button type="button" aria-label={product.name + ' 아래로 이동'} disabled={busy || index === orderDraft.length - 1}
-                onClick={() => moveProduct(product.id, index + 1)}>↓</button>
-            </li>)}
-          </ol>
-        </>}
+        <h2>{{ session: '새 조사 시작', product: dialog.product ? '제품 수정' : '제품 추가', count: dialog.product?.name, restore: '백업 복원' }[dialog.type]}</h2>
         {dialog.type === 'session' && <p>모든 제품이 미확인으로 시작합니다. 이전 조사는 이력에서 열 수 있어요.</p>}
         {dialog.type === 'product' && <>
           <label className="field">제품명<input name="name" required maxLength={100} defaultValue={dialog.product?.name} placeholder="예: 에쎄 수 0.1"/></label>

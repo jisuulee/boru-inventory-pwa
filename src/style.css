@@ -47,10 +47,11 @@ main.shell { padding-block: 20px 44px; }
 .row.featured { border-color: #4d9476; background: #f0f8f2; }
 .count-stepper { display: grid; grid-template-columns: 3rem minmax(0, 1fr) 3rem; align-items: center; gap: .5rem; }
 .count-stepper button, .count-stepper input { min-height: 3rem; font-size: 1.25rem; text-align: center; }
-.order-list { display: grid; gap: .4rem; max-height: 50dvh; overflow-y: auto; }
-.order-position { flex: 0 0 3.3rem; }
-.order-position input { text-align: center; }
-.order-list button { min-width: 2.75rem; padding-inline: .4rem; }
+.order-hint { margin-top: .65rem; color: #536b61; font-size: .8rem; }
+.row[data-order-id] { user-select: none; -webkit-touch-callout: none; cursor: grab; }
+.row.dragging { opacity: .55; cursor: grabbing; }
+.row.drop-before { box-shadow: 0 -3px #348464; }
+.row.drop-after { box-shadow: 0 3px #348464; }
 .row strong { font-size: .82rem; overflow-wrap:anywhere; max-width: 40%; }
 .row .count,.row .unknown { padding:4px 7px; border-radius:6px; background:#e4f3e8; color:#225940; }
 .row .unknown { background:#eef1ef; color:#52635b; }

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import 'fake-indexeddb/auto'
-import { apply, empty, sessionOf, quantity, search, parseSpeech, undoTarget, voiceCountAction } from './model.js'
+import { apply, empty, sessionOf, quantity, search, parseSpeech, undoTarget, voiceCountAction, moveProductOrder } from './model.js'
 import { transact, validateBackup } from './db.js'
 
 test('new surveys distinguish zero from unknown and preserve prior history', () => {
@@ -51,6 +51,13 @@ test('manual product order persists and rejects a stale or incomplete reorder', 
   await transact(state => apply(state, { type: 'reorder-products', before, ids }))
   await assert.rejects(transact(state => apply(state, { type: 'reorder-products', before, ids })), /목록이 바뀌었어요/)
   assert.deepEqual(validateBackup(await transact()).products.map(product => product.id), ids)
+})
+
+test('dropping before or after a visible product retains the other products in order', () => {
+  const order = ['a', 'hidden', 'b', 'c']
+  assert.deepEqual(moveProductOrder(order, 'a', 'b', true), ['hidden', 'b', 'a', 'c'])
+  assert.deepEqual(moveProductOrder(order, 'c', 'a', false), ['c', 'a', 'hidden', 'b'])
+  assert.equal(moveProductOrder(order, 'c', 'b', true), order)
 })
 
 test('speech recognizes initial S as 에쎄 and preserves Latin brand names', () => {
