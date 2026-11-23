@@ -5,6 +5,7 @@ import { isAccountId } from '../src/cloud.js'
 
 const origins = new Set(['https://jisuulee.github.io', 'https://boru-inventory-pwa.smilingcheetah1.chatgpt.site'])
 const maxBytes = 1_000_000
+const productCollator = new Intl.Collator('ko', { numeric: true })
 
 function readInventory(db, key) {
   return db.prepare('SELECT data, revision FROM inventory_account WHERE id = ?').bind(key).first()
@@ -50,6 +51,15 @@ async function inventory(request, db) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload.account))
   const key = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('')
   try {
+    if (payload.operation === 'sort-products') {
+      const row = await readInventory(db, key)
+      const state = row ? JSON.parse(row.data) : empty()
+      const sorted = state.products.toSorted((left, right) => productCollator.compare(left.name, right.name))
+      const changed = sorted.some((product, index) => product.id !== state.products[index].id)
+      if (changed && !await writeInventory(db, key, JSON.stringify({ ...state, products: sorted }), row.revision))
+        return json({ error: 'conflict' }, 409)
+      return json({ count: sorted.filter(product => !product.archived).length, changed })
+    }
     if (payload.operation === 'append-products') {
       const names = payload.names
       if (!Array.isArray(names) || names.length < 1 || names.length > 500 ||
