@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import 'fake-indexeddb/auto'
 import { apply, empty, sessionOf, quantity, search, parseSpeech, undoTarget, voiceCountAction, moveProductOrder } from './model.js'
 import { transact, validateBackup } from './db.js'
+import { appendMissingProducts } from './model.js'
 
 test('new surveys distinguish zero from unknown and preserve prior history', () => {
   const data = empty()
@@ -58,6 +59,23 @@ test('dropping before or after a visible product retains the other products in o
   assert.deepEqual(moveProductOrder(order, 'a', 'b', true), ['hidden', 'b', 'a', 'c'])
   assert.deepEqual(moveProductOrder(order, 'c', 'a', false), ['c', 'a', 'hidden', 'b'])
   assert.equal(moveProductOrder(order, 'c', 'b', true), order)
+})
+
+test('bulk product addition skips normalized duplicates and deletion preserves history', () => {
+  const data = empty()
+  assert.equal(appendMissingProducts(data, ['말보로 레드', '  말보로레드  ', '에쎄 수']), 2)
+  const product = data.products[0]
+  apply(data, { type: 'session' })
+  const session = sessionOf(data)
+  assert.equal(quantity(session, product.id), null)
+  const count = { type: 'count', session: session.id, id: product.id, kind: 'set', amount: 3 }
+  apply(data, count)
+  apply(data, { type: 'archive-product', id: product.id })
+  assert.deepEqual(search(data.products, '').map(item => item.product.name), ['에쎄 수'])
+  assert.equal(quantity(session, product.id), 3)
+  assert.throws(() => apply(data, count), /제품을 찾을 수 없습니다/)
+  assert.equal(appendMissingProducts(data, ['말보로레드']), 0)
+  assert.doesNotThrow(() => validateBackup(data))
 })
 
 test('speech recognizes initial S as 에쎄 and preserves Latin brand names', () => {

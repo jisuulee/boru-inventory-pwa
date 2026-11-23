@@ -1,6 +1,18 @@
 export const empty = () => ({ version: 1, products: [], sessions: [], active: null })
 export const normalize = value => value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
 export const sessionOf = state => state.sessions.find(session => session.id === state.active)
+export function appendMissingProducts(state, names) {
+  const seen = new Set(state.products.map(product => normalize(product.name)))
+  let added = 0
+  for (const name of names) {
+    const key = normalize(name)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    state.products.push({ id: crypto.randomUUID(), name: name.trim(), aliases: [] })
+    added++
+  }
+  return added
+}
 export function moveProductOrder(ids, id, target, after) {
   if (id === target || !ids.includes(id) || !ids.includes(target)) return ids
   const next = ids.filter(item => item !== id)
@@ -39,7 +51,7 @@ export function apply(state, action) {
     if (!session || session.id !== action.session) throw Error('조사가 바뀌었습니다. 다시 시도해 주세요.')
     const name = action.name.trim()
     if (!normalize(name) || name.length > 100) throw Error('제품명을 다시 말해 주세요.')
-    if (state.products.some(product => normalize(product.name) === normalize(name)))
+    if (state.products.some(product => !product.archived && normalize(product.name) === normalize(name)))
       throw Error('이미 등록된 제품입니다. 다시 말해 주세요.')
     const after = nextQuantity(0, action.kind === 'auto' ? 'set' : 'add', action.amount)
     const id = crypto.randomUUID()
@@ -53,10 +65,14 @@ export function apply(state, action) {
     if (action.ids.length !== products.size || new Set(action.ids).size !== products.size ||
         action.ids.some(id => !products.has(id))) throw Error('제품 순서를 확인해 주세요.')
     state.products = action.ids.map(id => products.get(id))
+  } else if (action.type === 'archive-product') {
+    const product = state.products.find(item => item.id === action.id)
+    if (!product) throw Error('제품을 찾을 수 없습니다.')
+    product.archived = true
   } else if (action.type === 'product') {
     const name = action.name.trim()
     if (!normalize(name)) throw Error('제품명을 입력해 주세요.')
-    if (state.products.some(product => product.id !== action.id && normalize(product.name) === normalize(name)))
+    if (state.products.some(product => !product.archived && product.id !== action.id && normalize(product.name) === normalize(name)))
       throw Error('같은 이름의 제품이 있습니다.')
     const product = state.products.find(item => item.id === action.id)
     const fields = { name, aliases: action.aliases.split(',').map(alias => alias.trim()).filter(Boolean) }
@@ -71,7 +87,7 @@ export function apply(state, action) {
       session.events.push({ id: crypto.randomUUID(), at, product: target.product,
         before: quantity(session, target.product), after: target.before, undo: target.id })
     } else {
-      if (!state.products.some(item => item.id === action.id)) throw Error('제품을 찾을 수 없습니다.')
+      if (!state.products.some(item => item.id === action.id && !item.archived)) throw Error('제품을 찾을 수 없습니다.')
       const before = quantity(session, action.id)
       if ('expected' in action && action.expected !== before) throw Error('수량이 바뀌었습니다. 명령을 다시 말해 주세요.')
       const after = nextQuantity(before, action.kind, action.amount)
@@ -94,6 +110,7 @@ function normalizeSpokenProduct(name) {
   return name.normalize('NFKC').trim().replace(/^s(?=$|[\s가-힣])/i, '에쎄')
 }
 export function search(products, query, { voice = false } = {}) {
+  products = products.filter(product => !product.archived)
   const searchKey = voice ? value => normalize(normalizeSpokenProduct(value)) : normalize
   const key = searchKey(query)
   if (!key) return products.map(product => ({ product, score: 0 }))

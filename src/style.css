@@ -50,6 +50,7 @@ main.shell { padding-block: 20px 44px; }
 .order-hint { margin-top: .65rem; color: #536b61; font-size: .8rem; }
 .row[data-order-id] { user-select: none; -webkit-touch-callout: none; cursor: grab; }
 .row.dragging { opacity: .55; cursor: grabbing; }
+.delete-product { flex-shrink: 0; width: 2.75rem; padding-inline: 0; color: #9b3c34; }
 .row.drop-before { box-shadow: 0 -3px #348464; }
 .row.drop-after { box-shadow: 0 3px #348464; }
 .row strong { font-size: .82rem; overflow-wrap:anywhere; max-width: 40%; }

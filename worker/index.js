@@ -1,10 +1,21 @@
 import files from 'site-assets'
 import { validateBackup } from '../src/db.js'
-import { empty } from '../src/model.js'
+import { appendMissingProducts, empty, normalize } from '../src/model.js'
 import { isAccountId } from '../src/cloud.js'
 
 const origins = new Set(['https://jisuulee.github.io', 'https://boru-inventory-pwa.smilingcheetah1.chatgpt.site'])
 const maxBytes = 1_000_000
+
+function readInventory(db, key) {
+  return db.prepare('SELECT data, revision FROM inventory_account WHERE id = ?').bind(key).first()
+}
+
+async function writeInventory(db, key, data, revision) {
+  const result = revision === 0
+    ? await db.prepare('INSERT INTO inventory_account (id, data, revision) VALUES (?, ?, 1) ON CONFLICT(id) DO NOTHING').bind(key, data).run()
+    : await db.prepare('UPDATE inventory_account SET data = ?, revision = revision + 1 WHERE id = ? AND revision = ?').bind(data, key, revision).run()
+  return result.meta.changes === 1
+}
 
 async function inventory(request, db) {
   const origin = request.headers.get('Origin')
@@ -39,18 +50,30 @@ async function inventory(request, db) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload.account))
   const key = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('')
   try {
+    if (payload.operation === 'append-products') {
+      const names = payload.names
+      if (!Array.isArray(names) || names.length < 1 || names.length > 500 ||
+          names.some(name => typeof name !== 'string' || name.length > 100 || !normalize(name)))
+        return json({ error: 'invalid' }, 400)
+      const row = await readInventory(db, key)
+      const state = row ? JSON.parse(row.data) : empty()
+      const added = appendMissingProducts(state, names)
+      if (added) {
+        const data = JSON.stringify(state)
+        if (new TextEncoder().encode(data).byteLength > maxBytes - 256) return json({ error: 'size' }, 413)
+        if (!await writeInventory(db, key, data, row?.revision ?? 0)) return json({ error: 'conflict' }, 409)
+      }
+      return json({ added, skipped: names.length - added })
+    }
     if (!Object.hasOwn(payload, 'state')) {
-      const row = await db.prepare('SELECT data, revision FROM inventory_account WHERE id = ?').bind(key).first()
+      const row = await readInventory(db, key)
       return json({ state: row ? JSON.parse(row.data) : empty(), revision: row?.revision ?? 0 })
     }
     const { state, revision } = payload
     if (!Number.isSafeInteger(revision) || revision < 0) return json({ error: 'invalid' }, 400)
     try { validateBackup(state) } catch { return json({ error: 'invalid' }, 400) }
     const data = JSON.stringify(state)
-    const result = revision === 0
-      ? await db.prepare('INSERT INTO inventory_account (id, data, revision) VALUES (?, ?, 1) ON CONFLICT(id) DO NOTHING').bind(key, data).run()
-      : await db.prepare('UPDATE inventory_account SET data = ?, revision = revision + 1 WHERE id = ? AND revision = ?').bind(data, key, revision).run()
-    if (result.meta.changes !== 1) return json({ error: 'conflict' }, 409)
+    if (!await writeInventory(db, key, data, revision)) return json({ error: 'conflict' }, 409)
     return json({ state, revision: revision + 1 })
   } catch {
     return json({ error: 'storage' }, 503)

@@ -15,6 +15,7 @@ const icons = {
   search: 'M15.5 15.5L21 21 M18 10.5a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0z',
   plus: 'M12 5v14 M5 12h14', history: 'M3 12a9 9 0 1 1 2.5 6.2 M3 5v7h7 M12 7v5l3 2',
   settings: 'M4 7h16 M4 17h16 M9 4v6 M15 14v6', stop: 'M6 6h12v12H6z',
+  trash: 'M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13 M10 11v5 M14 11v5',
 }
 function Icon({ name, size = 20 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={icons[name]}/></svg>
@@ -132,7 +133,7 @@ function App({ account, accountControl, transact }) {
     const command = parseSpeech(answer)
     if (command.kind === 'unclear') return '수량과 동작을 다시 말해 주세요. 예를 들어, 두 보루 추가.'
     if (!command.name && command.kind !== 'lookup') {
-      const product = selected.current?.session === session.id && data.products.find(item => item.id === selected.current.id)
+      const product = selected.current?.session === session.id && data.products.find(item => item.id === selected.current.id && !item.archived)
       return product ? resolveCommand(session, command, product) : '먼저 제품명을 말해 주세요.'
     }
     if (!command.name) return '제품명을 말해 주세요.'
@@ -192,7 +193,8 @@ function App({ account, accountControl, transact }) {
   }, [featured])
 
   const session = state && sessionOf(state)
-  const products = state?.products ?? []
+  const allProducts = state?.products ?? []
+  const products = allProducts.filter(product => !product.archived)
   const counts = new Map(session?.events.map(event => [event.product, event.after]))
   const checked = products.filter(product => counts.get(product.id) != null).length
   const progress = products.length ? Math.round(checked / products.length * 100) : 0
@@ -206,7 +208,7 @@ function App({ account, accountControl, transact }) {
   const { list: stockList, preview: drag } = useInventoryDrag(saveProductOrder, canReorder)
 
   function saveProductOrder(id, target, after) {
-    const before = products.map(product => product.id)
+    const before = allProducts.map(product => product.id)
     const ids = moveProductOrder(before, id, target, after)
     if (ids === before) return
     return run(async () => {
@@ -340,6 +342,8 @@ function App({ account, accountControl, transact }) {
             {tab === 'stock' ? <>
               <strong className={counts.get(product.id) == null ? 'unknown' : 'count'}>{labelQuantity(counts.get(product.id) ?? null)}</strong>
               <button disabled={!session} aria-label={product.name + ' 수량 입력'} onClick={() => openDialog({ type: 'count', product, session: session.id, before: counts.get(product.id) ?? null })}>입력</button>
+              <button className="delete-product" aria-label={product.name + ' 삭제'}
+                onClick={() => openDialog({ type: 'delete', product })}><Icon name="trash" size={18}/></button>
             </> : <button aria-label={product.name + ' 수정'} onClick={() => openDialog({ type: 'product', product })}>수정</button>}
           </article>)}
           {!matches.length && <div className="empty"><span className="item-icon"><Icon name={query ? 'search' : 'box'} size={24}/></span>
@@ -360,7 +364,7 @@ function App({ account, accountControl, transact }) {
         </select></label>
         <div className="list">
           {session?.events.toReversed().map(event => <article key={event.id} className="row">
-            <div className="grow"><h3>{products.find(product => product.id === event.product)?.name}</h3><p>{date(event.at)}{event.undo ? ' · 되돌리기' : ''}</p></div>
+            <div className="grow"><h3>{allProducts.find(product => product.id === event.product)?.name}</h3><p>{date(event.at)}{event.undo ? ' · 되돌리기' : ''}</p></div>
             <strong>{labelQuantity(event.before)} → {labelQuantity(event.after)}</strong>
           </article>)}
           {!session?.events.length && <div className="empty">아직 수량 변경이 없어요.</div>}
@@ -399,6 +403,9 @@ function App({ account, accountControl, transact }) {
           } else if (dialog.type === 'product') {
             await commit({ type: 'product', id: dialog.product?.id, name: form.get('name'), aliases: form.get('aliases') })
             setNotice('제품을 저장했습니다.')
+          } else if (dialog.type === 'delete') {
+            await commit({ type: 'archive-product', id: dialog.product.id })
+            setNotice('재고 목록에서 제품을 삭제했습니다.')
           } else if (dialog.type === 'count') {
             await commit({ type: 'count', session: dialog.session, id: dialog.product.id, expected: dialog.before,
               kind: 'set', amount: Number(form.get('amount')) })
@@ -414,7 +421,8 @@ function App({ account, accountControl, transact }) {
           setDialog(null)
         })
       }}>
-        <h2>{{ session: '새 조사 시작', product: dialog.product ? '제품 수정' : '제품 추가', count: dialog.product?.name, restore: '백업 복원' }[dialog.type]}</h2>
+        <h2>{{ session: '새 조사 시작', product: dialog.product ? '제품 수정' : '제품 추가', count: dialog.product?.name, restore: '백업 복원', delete: '제품 삭제' }[dialog.type]}</h2>
+        {dialog.type === 'delete' && <p><strong>{dialog.product.name}</strong>을 재고 목록에서 삭제할까요? 이전 조사 이력은 남습니다.</p>}
         {dialog.type === 'session' && <p>모든 제품이 미확인으로 시작합니다. 이전 조사는 이력에서 열 수 있어요.</p>}
         {dialog.type === 'product' && <>
           <label className="field">제품명<input name="name" required maxLength={100} defaultValue={dialog.product?.name} placeholder="예: 에쎄 수 0.1"/></label>
@@ -441,7 +449,9 @@ function App({ account, accountControl, transact }) {
         </>}
         {notice && <p className="notice" role="alert">{notice}</p>}
         <div className="actions"><button type="button" disabled={busy} onClick={() => { setNotice(''); setDialog(null) }}>취소</button>
-          <button className="primary" disabled={busy || (dialog.type === 'count' && (!validCount || countInput === ''))}>{dialog.type === 'session' ? '시작' : dialog.type === 'restore' ? '교체 및 복원' : '저장'}</button></div>
+          <button className={dialog.type === 'delete' ? 'danger' : 'primary'} disabled={busy || (dialog.type === 'count' && (!validCount || countInput === ''))}>
+            {({ session: '시작', restore: '교체 및 복원', delete: '삭제' })[dialog.type] ?? '저장'}
+          </button></div>
       </form>}
     </dialog>
   </>
